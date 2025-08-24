@@ -1,0 +1,1 @@
+import 'package:flutter/material.dart'; class CalibrationScreen extends StatelessWidget{ const CalibrationScreen({super.key}); @override Widget build(BuildContext c)=>const Center(child: Text('Кнопка калибровки на главном экране (простая версия).')); }
