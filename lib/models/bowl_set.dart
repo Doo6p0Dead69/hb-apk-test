@@ -1,1 +1,0 @@
-import 'bowl.dart'; class BowlSet{ String name; List<Bowl> items; BowlSet({required this.name,required this.items}); Map<String,dynamic> toJson()=>{'name':name,'items':items.map((e)=>e.toJson()).toList()}; static BowlSet fromJson(Map<String,dynamic> j)=>BowlSet(name:j['name']??'Set', items:(j['items'] as List).map((e)=>Bowl.fromJson(Map<String,dynamic>.from(e))).toList()); }

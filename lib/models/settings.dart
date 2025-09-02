@@ -1,1 +1,0 @@
-class Settings{ double a4=440; int sampleRate=48000; int bufferSize=4096; double sensitivity=0.5; Map<String,dynamic> toJson()=>{'a4':a4,'sampleRate':sampleRate,'bufferSize':bufferSize,'sensitivity':sensitivity}; }
