@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Тибетские чаши</title>
+<style>
+body,html{margin:0;height:100%;background:#222;color:#eee;font-family:sans-serif;overflow:hidden;}
+#topbar{position:fixed;top:0;left:0;right:0;display:flex;flex-wrap:wrap;gap:4px;padding:4px;background:#333;z-index:10;align-items:center;font-size:14px;}
+#board{position:absolute;top:60px;bottom:0;left:0;right:0;overflow:hidden;touch-action:none;}
+.bowl{position:absolute;border-radius:50%;background:radial-gradient(circle at 30% 30%,#eee,#999 60%,#666);border:2px solid #bfa;box-shadow:0 2px 4px rgba(0,0,0,0.5);transition:transform .1s, box-shadow .3s;min-width:60px;min-height:60px;}
+button.active{background:#555;color:#fff;}
+.bowl.playing{transform:scale(1.05);box-shadow:0 0 15px var(--glow,#ff0);}
+@media (max-width:600px){#topbar{font-size:12px;} .bowl{min-width:50px;min-height:50px;}}
+#board.markup{background-size:contain;background-repeat:no-repeat;background-position:center;}
+.markup .bowl{cursor:move;}
+</style>
+<!--
+Как поменять позиции и частоты:
+ - Измените массив freqList в <script> для новых частот.
+ - Для позиций включите режим "Разметка", перетащите чаши и экспортируйте JSON.
+-->
+</head>
+<body>
+<div id="topbar">
+<button id="modeM" aria-label="Малета">Малета</button>
+<button id="modeS" aria-label="Стик">Стик</button>
+<button id="modeL" aria-label="Кручение Low">Кручение Low</button>
+<button id="modeH" aria-label="Кручение High">Кручение High</button>
+<label>Vol <input id="vol" type="range" min="0" max="1" step="0.01"></label>
+<label>Reverb <input id="rev" type="range" min="0" max="1" step="0.01"></label>
+<label>Damp <input id="damp" type="range" min="0.1" max="1" step="0.01"></label>
+<label>Bright <input id="bright" type="range" min="0" max="1" step="0.01"></label>
+<button id="test">Тест</button>
+<button id="self">Самотест</button>
+<button id="markup">Разметка</button>
+<input id="bgfile" type="file" accept="image/*" style="display:none">
+<button id="export">Экспорт позиций</button>
+<button id="reset">Сброс позиций</button>
+<button id="mute" aria-label="Mute">🔊</button>
+</div>
+<div id="board"></div>
+<script>
+const ratios=[1.00,2.02,2.40,2.95,3.80,4.25,5.10];
+const freqList=[177,132,198,148,112,161,124,345,258,396,292,431,326,252,85];
+const keyMap=["Digit1","Digit2","Digit3","Digit4","Digit5","Digit6","Digit7","Digit8","Digit9","Digit0","KeyQ","KeyW","KeyE","KeyR","KeyT"];
+const modeKeys={KeyM:"mallet",KeyS:"suede",KeyL:"low",KeyH:"high"};
+let ctx,master,dry,wet,reverb,compressor;let currentMode=localStorage.mode||"mallet";let mute=false;const bowls=[];let voices=[];const maxVoices=8;
+function initAudio(){if(ctx) return;ctx=new (window.AudioContext||window.webkitAudioContext)();compressor=ctx.createDynamicsCompressor();compressor.connect(ctx.destination);master=ctx.createGain();master.gain.value=+localStorage.vol||0.8;master.connect(compressor);dry=ctx.createGain();dry.gain.value=1;dry.connect(master);wet=ctx.createGain();wet.gain.value=+localStorage.rev||0.3;wet.connect(master);reverb=buildReverb();reverb.output.connect(wet);document.addEventListener('visibilitychange',()=>{if(!ctx)return;if(document.hidden)ctx.suspend();else ctx.resume();});console.log("AudioContext создан");}
+function buildReverb(){const input=ctx.createGain();const d1=ctx.createDelay(0.3);const d2=ctx.createDelay(0.3);const fb=ctx.createGain();fb.gain.value=0.2;input.connect(d1);d1.connect(d2);d2.connect(fb);fb.connect(d1);const out=ctx.createGain();d1.connect(out);d2.connect(out);return{input,output:out};}
+function createBowl(f0,i){const el=document.createElement('div');el.className="bowl";el.style.width="10vw";el.style.height="10vw";const pos=loadPosition(i);el.style.left=pos.x+"%";el.style.top=pos.y+"%";el.dataset.index=i;board.appendChild(el);const bowl={f0,el,voices:[]};el.addEventListener('pointerdown',e=>{if(markupMode){startDrag(e,bowl);return;}initAudio();handleDown(bowl);});el.addEventListener('pointerup',e=>handleUp(bowl));el.addEventListener('pointerleave',e=>handleUp(bowl));return bowl;}
+function handleDown(b){if(currentMode==="mallet") strikeMallet(b);else if(currentMode==="suede") strikeSuede(b);else if(currentMode==="low") rubLow(b,true);else if(currentMode==="high") rubHigh(b,true);}
+function handleUp(b){if(currentMode==="low") rubLow(b,false);else if(currentMode==="high") rubHigh(b,false);}
+function strikeMallet(b){playBowl(b,{attack:0.005,noiseDur:0.02,decay:3,bright:1});}
+function strikeSuede(b){playBowl(b,{attack:0.03,noiseDur:0.05,decay:4,bright:0.6});}
+function rubLow(b,start){if(start){const v=playContinuous(b,{rate:5,vibrato:0.3,bright:0.5});b.rubVoice=v;}else if(b.rubVoice){b.rubVoice.stop();b.rubVoice=null;}}
+function rubHigh(b,start){if(start){const v=playContinuous(b,{rate:12,vibrato:0.4,bright:0.8});b.rubVoice=v;}else if(b.rubVoice){b.rubVoice.stop();b.rubVoice=null;}}
+function playBowl(b,prof){const now=ctx.currentTime;const src=ctx.createBufferSource();src.buffer=noiseBuffer(0.1);const ng=ctx.createGain();src.connect(ng);ng.gain.setValueAtTime(0,now);ng.gain.linearRampToValueAtTime(1,now+prof.attack);ng.gain.exponentialRampToValueAtTime(0.0001,now+prof.noiseDur+prof.attack);const sum=ctx.createGain();ratios.forEach((r,idx)=>{const bp=ctx.createBiquadFilter();bp.type="bandpass";bp.frequency.value=b.f0*r;bp.Q.value=15;ng.connect(bp);const g=ctx.createGain();let amp=1-idx/ratios.length*(1-bright.value);if(idx>3) amp*=prof.bright;g.gain.setValueAtTime(amp,now+prof.attack);const dec=prof.decay*damp.value;g.gain.exponentialRampToValueAtTime(0.0001,now+dec);bp.connect(g);g.connect(sum);});sum.connect(dry);sum.connect(reverb.input);src.start(now);src.stop(now+prof.decay+1);b.el.classList.add("playing");setTimeout(()=>b.el.classList.remove("playing"),prof.decay*1000);addVoice({stop:()=>src.stop()});}
+function playContinuous(b,opts){const now=ctx.currentTime;const src=ctx.createBufferSource();src.buffer=noiseBuffer(1);src.loop=true;const g=ctx.createGain();src.connect(g);const lfo=ctx.createOscillator();lfo.frequency.value=opts.rate;const lfoGain=ctx.createGain();lfoGain.gain.value=0.5;lfo.connect(lfoGain);lfoGain.connect(g.gain);const vib=ctx.createOscillator();vib.frequency.value=5;const vibGain=ctx.createGain();vibGain.gain.value=opts.vibrato*100;vib.connect(vibGain);const sum=ctx.createGain();ratios.forEach((r,idx)=>{const bp=ctx.createBiquadFilter();bp.type="bandpass";bp.Q.value=15;bp.frequency.value=b.f0*r;vibGain.connect(bp.detune);g.connect(bp);const g2=ctx.createGain();let amp=1-idx/ratios.length*(1-bright.value);if(idx>3) amp*=opts.bright;g2.gain.setValueAtTime(amp,now);bp.connect(g2);g2.connect(sum);});sum.connect(dry);sum.connect(reverb.input);src.start();lfo.start();vib.start();b.el.classList.add("playing");const voice={stop:()=>{const t=ctx.currentTime;g.gain.setTargetAtTime(0,t,0.2);setTimeout(()=>{src.stop();lfo.stop();vib.stop();b.el.classList.remove("playing");},500);}};addVoice(voice);return voice;}
+function addVoice(v){voices.push(v);if(voices.length>maxVoices){const old=voices.shift();try{old.stop();}catch(e){}}}
+let noiseBuf;function noiseBuffer(len){if(noiseBuf) return noiseBuf;const n=len*ctx.sampleRate;const buffer=ctx.createBuffer(1,n,ctx.sampleRate);const data=buffer.getChannelData(0);for(let i=0;i<n;i++)data[i]=Math.random()*2-1;noiseBuf=buffer;return buffer;}
+const board=document.getElementById('board');const vol=document.getElementById('vol');const rev=document.getElementById('rev');const damp=document.getElementById('damp');const bright=document.getElementById('bright');vol.value=localStorage.vol||0.8;rev.value=localStorage.rev||0.3;damp.value=localStorage.damp||0.8;bright.value=localStorage.bright||0.8;vol.oninput=()=>{if(master) master.gain.value=vol.value;localStorage.vol=vol.value;};rev.oninput=()=>{if(wet) wet.gain.value=rev.value;localStorage.rev=rev.value;};damp.oninput=()=>{localStorage.damp=damp.value;};bright.oninput=()=>{localStorage.bright=bright.value;};
+function setMode(m){currentMode=m;localStorage.mode=m;document.querySelectorAll('#topbar button').forEach(b=>b.classList.remove('active'));document.getElementById('mode'+m[0].toUpperCase()).classList.add('active');document.documentElement.style.setProperty('--glow',modeColor());}
+function modeColor(){return currentMode==="mallet"?"#ff0":currentMode==="suede"?"#f80":currentMode==="low"?"#0ff":"#f0f";}
+["mallet","suede","low","high"].forEach(m=>{document.getElementById('mode'+m[0].toUpperCase()).onclick=()=>setMode(m);});setMode(currentMode);
+document.getElementById('test').onclick=playTestPattern;document.getElementById('self').onclick=selfTest;document.getElementById('mute').onclick=()=>{mute=!mute;if(master) master.gain.value=mute?0:vol.value;document.getElementById('mute').textContent=mute?"🔇":"🔊";};
+function playTestPattern(){let t=0;bowls.forEach(b=>{setTimeout(()=>strikeMallet(b),t);t+=300;});}
+function selfTest(){const first=bowls[0];["mallet","suede","low","high"].reduce((p,mode)=>p.then(()=>new Promise(res=>{setMode(mode);if(mode==="low"||mode==="high"){handleDown(first);setTimeout(()=>{handleUp(first);res();},500);}else{handleDown(first);setTimeout(res,500);} })),Promise.resolve()).then(()=>{let t=0;bowls.forEach(b=>{setTimeout(()=>handleDown(b),t);t+=300;});});}
+let markupMode=false,drag=null;document.getElementById('markup').onclick=()=>{markupMode=!markupMode;board.classList.toggle('markup',markupMode);document.getElementById('bgfile').style.display=markupMode?"block":"none";};document.getElementById('bgfile').onchange=e=>{const file=e.target.files[0];if(!file) return;const fr=new FileReader();fr.onload=ev=>{board.style.backgroundImage=`url(${ev.target.result})`;};fr.readAsDataURL(file);};document.getElementById('export').onclick=()=>{const data=bowls.map((b,i)=>({i,x:parseFloat(b.el.style.left),y:parseFloat(b.el.style.top)}));const blob=new Blob([JSON.stringify(data)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='positions.json';a.click();URL.revokeObjectURL(a.href);};document.getElementById('reset').onclick=()=>{localStorage.removeItem('bowlPos');location.reload();};
+function startDrag(e,b){drag={b,offsetX:e.offsetX,offsetY:e.offsetY};}
+board.addEventListener('pointermove',e=>{if(!drag) return;const rect=board.getBoundingClientRect();const x=(e.clientX-drag.offsetX-rect.left)/rect.width*100;const y=(e.clientY-drag.offsetY-rect.top)/rect.height*100;drag.b.el.style.left=x+"%";drag.b.el.style.top=y+"%";savePositions();});board.addEventListener('pointerup',()=>{drag=null;});
+function savePositions(){const data=bowls.map(b=>({x:parseFloat(b.el.style.left),y:parseFloat(b.el.style.top)}));localStorage.bowlPos=JSON.stringify(data);}function loadPosition(i){const arr=JSON.parse(localStorage.bowlPos||"[]");if(arr[i]) return arr[i];const cols=5;const size=100/cols;const row=Math.floor(i/cols);const col=i%cols;return{x:col*size+size/2-5,y:row*33+10};}
+document.addEventListener('keydown',e=>{const idx=keyMap.indexOf(e.code);if(idx>=0){const b=bowls[idx];handleDown(b);}if(modeKeys[e.code]) setMode(modeKeys[e.code]);});document.addEventListener('keyup',e=>{const idx=keyMap.indexOf(e.code);if(idx>=0){const b=bowls[idx];handleUp(b);}});
+freqList.forEach((f,i)=>bowls.push(createBowl(f,i)));
+console.log("Список чаш:",freqList);console.log("AudioContext поддержка:",!!window.AudioContext);console.log("Pointer events:",'PointerEvent' in window);
+</script>
+</body>
+</html>
